@@ -51,4 +51,25 @@ eq(L.ocrFlag('Kapitel 5 Wortschatz'), 'похоже на заголовок', 'f
 eq(L.ocrFlag('Wortschatz:'), 'похоже на заголовок', 'flag heading colon');
 eq(L.ocrFlag('der Bleistift — карандаш'), '', 'flag ok word');
 
+// --- пропущенные буквы ---
+eq(L.errorPositions('die Schwster', 'die Schwester'), [8], 'err: missing letter');
+eq(L.errorPositions('die Schwaster', 'die Schwester'), [8], 'err: wrong letter');
+eq(L.errorPositions('der hund', 'der Hund'), [4], 'err: case');
+eq(L.errorPositions('die Hund', 'der Hund'), [0, 1, 2], 'err: wrong article → whole article');
+eq(L.errorPositions('Hund', 'der Hund'), [0, 1, 2], 'err: missing article');
+eq(L.errorPositions('der Hundd', 'der Hund'), [7], 'err: extra letter at end → neighbour');
+eq(L.errorPositions('der Huund', 'der Hund'), [5, 6], 'err: extra letter inside → neighbours');
+eq(L.errorPositions('', 'der Hund'), [], 'err: empty');
+eq(L.trickyPositions('die Großeltern'), [1, 2, 4, 7], 'tricky: ie, capital, ß');
+eq(L.trickyPositions('fahren'), [2], 'tricky: silent h');
+const fixed = () => 0.5;
+const m1 = L.clozeMask('die Schwester', [8], 1, fixed);
+eq(m1.includes(8) && m1.length === 5, true, 'mask L1: error hidden, 35% of 12 letters rounded up');
+const m2 = L.clozeMask('die Schwester', [8], 2, fixed);
+eq(m2.includes(8) && m2.length === 8, true, 'mask L2: error hidden, ~60%');
+eq(m1.every(i => m2.length >= m1.length), true, 'mask L2 bigger');
+eq(L.clozeMask('der Hund', [], 1, fixed).every(i => ' '.indexOf('der Hund'[i]) < 0), true, 'mask skips spaces');
+eq(L.clozeMask('ab', [0, 1], 2, fixed), [1], 'mask keeps one letter visible');
+eq(L.clozeMask('Ei', [], 1, fixed).length, 1, 'mask tiny word');
+
 process.on('exit', () => { if (failed) { console.log(`\n${failed} failed`); process.exitCode = 1; } else console.log('\nall passed'); });

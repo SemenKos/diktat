@@ -1,5 +1,5 @@
 // Офлайн-режим: сначала сеть (чтобы обновления приходили сразу), при отсутствии сети — кэш.
-const CACHE = 'diktat-v4';
+const CACHE = 'diktat-v7';
 const ASSETS = ['./', './index.html', './style.css', './logic.js', './translate.js', './mascots.js', './app.js', './manifest.json', './icon.svg', './icon-192.png', './icon-512.png'];
 
 self.addEventListener('install', e => {

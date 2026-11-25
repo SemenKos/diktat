@@ -429,3 +429,16 @@ mark.extra { background: var(--red); color: #fff; text-decoration: line-through;
 @media (prefers-reduced-motion: reduce) {
   .ogar, .ogar *, .croc, .croc *, .scene *, .mini-say { animation-duration: .01ms !important; animation-iteration-count: 1 !important; }
 }
+.voice-test { gap: 8px; }
+.voice-test .btn { flex: 1; margin-top: 0; }
+
+/* ---------- Задание с пропусками ---------- */
+.cloze { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px 16px; margin: 6px 0 4px; }
+.cword { display: inline-flex; gap: 3px; }
+.cloze .ch, .cloze .cell { width: 32px; height: 46px; font-size: 26px; font-weight: 800; text-align: center; line-height: 46px; }
+.cloze .ch { width: auto; min-width: 0; padding: 0 1px; color: var(--fg); }
+.cloze .cell { padding: 0 !important; border: 2px solid var(--blue); border-bottom-width: 4px; border-radius: 10px; background: var(--soft); color: var(--blue); caret-color: var(--blue); }
+.cloze .cell:focus { outline: none; background: var(--card); border-color: var(--blue-d); box-shadow: 0 0 0 3px color-mix(in srgb, var(--blue) 25%, transparent); }
+.cloze .cell.right { border-color: var(--green); background: var(--ok-bg); color: var(--ok-fg); }
+.cloze .cell.wrong { border-color: var(--red); background: var(--bad-bg); color: var(--bad-fg); }
+@media (max-width: 380px) { .cloze .ch, .cloze .cell { height: 40px; font-size: 22px; line-height: 40px; } .cloze .cell { width: 26px; } .cword { gap: 2px; } }

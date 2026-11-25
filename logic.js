@@ -28,6 +28,69 @@ function parseText(text) {
   return { ok: ok.filter(p => p.de), bad };
 }
 
+/* ---------- Задание «впиши пропущенные буквы» ---------- */
+
+const isLetter = c => /[A-Za-zÄÖÜäöüßẞ]/.test(c);
+
+/**
+ * Позиции букв правильного слова, в которых ученик ошибся (индексы в [...target]).
+ * Пропущенная или неверная буква — её позиция; лишняя вставленная буква — соседние позиции.
+ */
+function errorPositions(given, target) {
+  const g = [...norm(given)], t = [...target];
+  if (!g.length) return [];
+  const [kg, kt] = lcsMarks(g, t);
+  const err = new Set(kt.map((k, i) => (k ? -1 : i)).filter(i => i >= 0));
+  if (!err.size) {
+    // только лишние буквы: отмечаем соседей места вставки
+    const matched = kt.map((k, i) => (k ? i : -1)).filter(i => i >= 0);
+    let m = 0;
+    g.forEach((_, i) => {
+      if (kg[i]) { m++; return; }
+      if (matched[m] !== undefined) err.add(matched[m]);
+      if (m > 0) err.add(matched[m - 1]);
+    });
+  }
+  // перепутан или пропущен артикль — прячем его целиком, а не одну букву
+  const mt = target.match(ART), mg = g.join('').match(/^(\S+)\s/);
+  if (mt && (!mg || lower(mg[1]) !== lower(mt[1]))) for (let i = 0; i < mt[1].length; i++) err.add(i);
+  return [...err].filter(i => isLetter(t[i])).sort((a, b) => a - b);
+}
+
+/** «Коварные» места немецкого написания: умлауты, ß, заглавные, двойные буквы, ie/ei, немое h. */
+function trickyPositions(target) {
+  const c = [...target], out = [];
+  c.forEach((ch, i) => {
+    const p = c[i - 1] || '', n = c[i + 1] || '';
+    if (!isLetter(ch)) return;
+    if (/[äöüßÄÖÜẞ]/.test(ch) || /[A-ZÄÖÜ]/.test(ch) || ch === p || ch === n ||
+      (ch === 'h' && /[aeiouäöü]/i.test(p)) ||
+      (ch === 'e' && (p === 'i' || n === 'i')) || (ch === 'i' && (p === 'e' || n === 'e'))) out.push(i);
+  });
+  return out;
+}
+
+/**
+ * Какие буквы спрятать. level 1 — около трети букв, level 2 — около 60%.
+ * Буквы с ошибками прячутся всегда, потом «коварные», потом случайные. Одна буква остаётся видна.
+ */
+function clozeMask(target, errPos = [], level = 1, rnd = Math.random) {
+  const chars = [...target];
+  const letters = chars.map((c, i) => (isLetter(c) ? i : -1)).filter(i => i >= 0);
+  if (!letters.length) return [];
+  const want = Math.max(1, Math.ceil(letters.length * (level >= 2 ? 0.6 : 0.35)));
+  const hide = new Set(errPos.filter(i => isLetter(chars[i])));
+  const mix = arr => arr.map(v => [rnd(), v]).sort((a, b) => a[0] - b[0]).map(x => x[1]);
+  for (const i of [...mix(trickyPositions(target)), ...mix(letters)]) {
+    if (hide.size >= want) break;
+    hide.add(i);
+  }
+  if (letters.length > 1 && hide.size >= letters.length) {
+    hide.delete(letters.find(i => !errPos.includes(i)) ?? letters[0]);
+  }
+  return [...hide].sort((a, b) => a - b);
+}
+
 /* ---------- Поиск перевода ---------- */
 
 const ARTICLE_BY_GENDER = { m: 'der', f: 'die', n: 'das' };
@@ -248,5 +311,6 @@ if (typeof module !== 'undefined') {
     parseLine, parseText, norm, variants, checkAnswer, lev, lcsMarks,
     baseOf, lookupKeys, cleanAlt, parseWiki, cleanMt, suggestArticle, splitRu,
     fixMixedScript, cleanOcrLine, ocrFlag,
+    errorPositions, trickyPositions, clozeMask,
   };
 }

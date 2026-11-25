@@ -1,6 +1,7 @@
 'use strict';
-/* global parseText, checkAnswer, lcsMarks, norm, splitRu, suggestArticle, translateWord, cleanOcrLine, ocrFlag, Tesseract,
-   ogarSvg, mascotMini, ogarPhrase, crocPhrase, sfx, sceneFor, sceneHtml, startScene, stopSong, singSong */
+/* global parseText, checkAnswer, lcsMarks, norm, splitRu, suggestArticle, translateWord, cleanOcrLine, ocrFlag, Tesseract, errorPositions, clozeMask,
+   ogarSvg, mascotMini, ogarPhrase, crocPhrase, sfx, sceneFor, sceneHtml, startScene, stopSong, singSong,
+   mascotSpeak, charSay */
 
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
@@ -21,7 +22,7 @@ const nWords = n => `${n} ${plural(n, 'слово', 'слова', 'слов')}`;
 
 /* ---------- Данные ---------- */
 
-const DEFAULT_SETTINGS = { strictCase: true, autoSpeak: true, rate: 0.9, mascots: true, sounds: true };
+const DEFAULT_SETTINGS = { strictCase: true, autoSpeak: true, rate: 0.9, mascots: true, sounds: true, voices: true };
 
 function newWord(de, ru) { return { id: uid(), de, ru, ok: 0, bad: 0, err: 0, last: 0 }; }
 
@@ -227,8 +228,14 @@ function viewSettings() {
         <input type="checkbox" class="switch" data-set="autoSpeak" ${st.autoSpeak ? 'checked' : ''}></label>
       <label class="row"><div class="grow"><b>Огарь и Крокодильчик</b><small>Радуются ответам, песня и полёт в Германию в конце урока</small></div>
         <input type="checkbox" class="switch" data-set="mascots" ${st.mascots ? 'checked' : ''}></label>
-      <label class="row"><div class="grow"><b>Звуки персонажей</b><small>Кряканье, смех Крокодильчика и его песня</small></div>
+      <label class="row"><div class="grow"><b>🔔 Звуки животных</b><small>Кряканье Огаря, смех Крокодильчика и музыка песни</small></div>
         <input type="checkbox" class="switch" data-set="sounds" ${st.sounds ? 'checked' : ''}></label>
+      <label class="row"><div class="grow"><b>🗣 Голоса животных</b><small>Огарь хвалит по-русски и по-немецки, Крокодильчик хихикает и поёт</small></div>
+        <input type="checkbox" class="switch" data-set="voices" ${st.voices ? 'checked' : ''}></label>
+      <div class="row voice-test">
+        <button class="btn ghost sm" data-act="voiceTest" data-who="ogar">🦆 Послушать Огаря</button>
+        <button class="btn ghost sm" data-act="voiceTest" data-who="croc">🐊 Послушать Крокодильчика</button>
+      </div>
       <div class="row col">
         <div><b>Скорость речи:</b> <span id="rateV">${st.rate}</span></div>
         <input type="range" min="0.5" max="1.2" step="0.05" value="${st.rate}" data-set="rate">
@@ -265,7 +272,7 @@ function importFile(e) {
 
 /* ---------- Тренировка ---------- */
 
-const TYPE_LABEL = { de2ru: 'Выбери перевод', ru2de: 'Выбери немецкое слово', write: 'Напиши по-немецки', listen: 'Напиши, что слышишь' };
+const TYPE_LABEL = { de2ru: 'Выбери перевод', ru2de: 'Выбери немецкое слово', write: 'Напиши по-немецки', listen: 'Напиши, что слышишь', fill: 'Впиши пропущенные буквы' };
 const STAGE = { 1: 'Этап 1 из 3', 2: 'Этап 2 из 3', 3: 'Этап 3 из 3', 4: 'Работа над ошибками' };
 const PRAISE = ['Отлично!', 'Верно!', 'Супер!', 'Так держать!', 'Genau!', 'Sehr gut!', 'Prima!'];
 const UMLAUTS = ['ä', 'ö', 'ü', 'ß', 'Ä', 'Ö', 'Ü'];
@@ -333,8 +340,9 @@ function viewTask() {
   const s = session, t = s.cur, w = s.wmap.get(t.wid);
   const total = s.done + s.queue.length + 1;
   const pct = Math.round(s.done / total * 100);
-  const label = [STAGE[t.stage], t.retry ? 'Повтор' : '', s.exam ? 'Контрольная' : '', TYPE_LABEL[t.type]].filter(Boolean).join(' · ');
+  const label = [STAGE[t.stage], t.help ? 'Тренируем слово' : t.retry ? 'Повтор' : '', s.exam ? 'Контрольная' : '', TYPE_LABEL[t.type]].filter(Boolean).join(' · ');
   const typed = t.type === 'write' || t.type === 'listen';
+  const typing = typed || t.type === 'fill';
   let body = '';
 
   if (t.type === 'de2ru') {
@@ -342,6 +350,10 @@ function viewTask() {
       <button class="say" data-act="say" data-text="${esc(w.de)}" aria-label="Произнести">🔊</button></div>`;
   } else if (t.type === 'ru2de' || t.type === 'write') {
     body = `<div class="prompt"><span class="ru">${esc(w.ru)}</span></div>`;
+  } else if (t.type === 'fill') {
+    body = `<div class="prompt"><span class="ru">${esc(w.ru)}</span>
+      <button class="say" data-act="say" data-text="${esc(t.target)}" aria-label="Произнести">🔊</button></div>
+      <div class="cloze" id="cloze">${clozeHtml(t)}</div>`;
   } else {
     body = `<div class="prompt listen">
         <button class="say huge" data-act="say" data-text="${esc(w.de)}" aria-label="Произнести">🔊</button>
@@ -354,12 +366,12 @@ function viewTask() {
     body += `<div class="opts">${s.opts.map((o, i) =>
       `<button class="opt" data-act="pick" data-i="${i}"><span class="num">${i + 1}</span><span>${esc(o)}</span></button>`).join('')}</div>`;
   } else {
-    body += `<input id="ans" class="ans" type="text" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"
-        lang="de" enterkeyhint="done" placeholder="по-немецки…">
-      <div class="umlauts">${UMLAUTS.map(c => `<button type="button" class="key" data-ins="${c}" tabindex="-1">${c}</button>`).join('')}</div>`;
+    if (t.type !== 'fill') body += `<input id="ans" class="ans" type="text" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"
+        lang="de" enterkeyhint="done" placeholder="по-немецки…">`;
+    body += `<div class="umlauts">${UMLAUTS.map(c => `<button type="button" class="key" data-ins="${c}" tabindex="-1">${c}</button>`).join('')}</div>`;
   }
 
-  const footer = typed
+  const footer = typing
     ? `<button class="btn ghost" data-act="skip">Не знаю</button><button class="btn primary" data-act="check">Проверить</button>`
     : '';
 
@@ -376,6 +388,7 @@ function viewTask() {
     <div class="footer" id="footer">${footer}</div>`;
 
   if (typed) $('#ans').focus();
+  if (t.type === 'fill') $('.cell')?.focus();
   if (db.settings.autoSpeak && (t.type === 'de2ru' || t.type === 'listen')) setTimeout(() => speak(w.de), 250);
 }
 
@@ -390,19 +403,63 @@ function diffHtml(given, target) {
   </div>`;
 }
 
+/** Слово с пропусками: видимые буквы — текст, спрятанные — клетки для ввода. Слова не переносятся посередине. */
+function clozeHtml(t) {
+  const hidden = new Set(t.mask);
+  let k = 0;
+  return t.target.split(' ').map(word => {
+    const html = [...word].map(c => {
+      const i = k++;
+      return hidden.has(i)
+        ? `<input class="cell" data-k="${i}" maxlength="2" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" lang="de" enterkeyhint="next" aria-label="буква ${i + 1}">`
+        : `<span class="ch">${esc(c)}</span>`;
+    }).join('');
+    k++; // пробел между словами
+    return `<span class="cword">${html}</span>`;
+  }).join('');
+}
+
+/** Ответ из клеток: видимые буквы + вписанные (пустая клетка — «_»). */
+function clozeValue(t) {
+  const chars = [...t.target];
+  $$('.cell').forEach(c => { chars[+c.dataset.k] = c.value || '_'; });
+  return chars.join('');
+}
+
+/** После ошибки в написании: два задания с пропусками (сначала меньше, потом больше), затем снова написать целиком. */
+function addHelpLadder(t, target, err) {
+  const s = session;
+  const put = (pos, task) => s.queue.splice(Math.min(pos, s.queue.length), 0, task);
+  const fill = level => ({ type: 'fill', wid: t.wid, stage: t.stage, help: true, target, err, level, mask: clozeMask(target, err, level) });
+  put(0, fill(1));
+  put(2, fill(2));
+  put(4, { ...t, retry: true });
+}
+
 function settle(ok, info) {
   const s = session, t = s.cur, w = s.wmap.get(t.wid);
   const typed = t.type === 'write' || t.type === 'listen';
   s.done++;
   w.last = Date.now();
   if (ok) {
-    s.good++; w.ok++; w.err = Math.max(0, w.err - 1);
+    s.good++;
+    if (t.type !== 'fill') { w.ok++; w.err = Math.max(0, w.err - 1); } // с подсказкой — ещё не «выучил»
   } else {
     s.bad++; w.bad++; w.err = Math.min(9, w.err + (typed ? 2 : 1));
     s.mistakes.add(w.id);
     if (!s.exam) {
-      const pos = Math.min(s.queue.length, 2 + Math.floor(Math.random() * 2));
-      s.queue.splice(pos, 0, { ...t, retry: true });
+      const target = info.r?.target;
+      if (typed && target) {
+        addHelpLadder(t, target, errorPositions(info.given, target));
+      } else if (t.type === 'fill') {
+        // снова то же задание, ошибочные клетки остаются спрятанными
+        const err = [...new Set([...t.err, ...errorPositions(info.given, t.target)])];
+        const pos = Math.min(s.queue.length, 1 + Math.floor(Math.random() * 2));
+        s.queue.splice(pos, 0, { ...t, err, mask: clozeMask(t.target, err, t.level), retry: true });
+      } else {
+        const pos = Math.min(s.queue.length, 2 + Math.floor(Math.random() * 2));
+        s.queue.splice(pos, 0, { ...t, retry: true });
+      }
     }
   }
   if (s.exam) s.answers.push({ wid: w.id, given: info.given, ok });
@@ -416,6 +473,8 @@ function settle(ok, info) {
   const mascots = db.settings.mascots;
   const ph = ok && mascots ? ogarPhrase() : null;
   if (mascots) ok ? sfx.quack() : sfx.croc();
+  const crocSays = !ok && mascots ? crocPhrase() : '';
+  if (mascots) mascotSpeak(ok, ok ? ph : crocSays); // после немецкого слова, в очередь
   let html;
   if (ok) {
     const title = ph ? `${esc(ph.text)} <span class="lang">${ph.flag}</span>` : PRAISE[Math.floor(Math.random() * PRAISE.length)];
@@ -432,7 +491,7 @@ function settle(ok, info) {
   }
   const f = $('#footer');
   f.className = 'footer fb ' + (ok ? 'ok' : 'bad');
-  f.innerHTML = `<div class="fb-row"><div class="fb-body">${html}</div>${mascots ? mascotMini(ok, ok ? '' : esc(crocPhrase())) : ''}</div>
+  f.innerHTML = `<div class="fb-row"><div class="fb-body">${html}</div>${mascots ? mascotMini(ok, esc(crocSays)) : ''}</div>
     <button class="btn ${ok ? 'success' : 'danger'} big" data-act="next" id="nextBtn">Дальше</button>`;
   const inp = $('#ans');
   if (inp) inp.focus(); else $('#nextBtn').focus();
@@ -497,6 +556,13 @@ function viewResult() {
 const actions = {
   back() { history.length > 1 ? history.back() : go(''); },
   singAgain() { singSong(); },
+  voiceTest(el) {
+    if (!hasTTS) return toast('Этот браузер не умеет говорить');
+    if (!db.settings.voices) return toast('Включи «Голоса животных»');
+    speechSynthesis.cancel();
+    if (el.dataset.who === 'ogar') { charSay('ogar', 'Привет! Я Огарь.'); charSay('ogar', 'Sehr gut!', 'de'); }
+    else charSay('croc', 'Ха-ха! А я Крокодильчик! Люблю ошибки!');
+  },
   say(el) { speak(el.dataset.text); },
   saySlow(el) { speak(el.dataset.text, true); },
   start(el) {
@@ -537,6 +603,7 @@ const actions = {
   check() {
     const s = session;
     if (s.fb) return;
+    if (s.cur.type === 'fill') return checkFill();
     const inp = $('#ans');
     if (!inp.value.trim()) { inp.focus(); inp.classList.add('shake'); setTimeout(() => inp.classList.remove('shake'), 400); return; }
     const w = s.wmap.get(s.cur.wid);
@@ -549,6 +616,10 @@ const actions = {
     const s = session;
     if (s.fb) return;
     const w = s.wmap.get(s.cur.wid);
+    if (s.cur.type === 'fill') {
+      $$('.cell').forEach(c => { c.readOnly = true; });
+      return settle(false, { given: '', r: checkAnswer('', s.cur.target) });
+    }
     const inp = $('#ans'); inp.readOnly = true;
     settle(false, { given: '', r: checkAnswer('', w.de) });
   },
@@ -594,10 +665,57 @@ app.addEventListener('click', e => {
 });
 
 // Кнопки умлаутов: не забираем фокус у поля, вставляем символ в позицию курсора
+/** Проверка задания с пропусками: каждая клетка отдельно (с учётом настройки регистра). */
+function checkFill() {
+  const t = session.cur;
+  const cells = $$('.cell');
+  const empty = cells.find(c => !c.value.trim());
+  if (empty) { empty.focus(); empty.classList.add('shake'); setTimeout(() => empty.classList.remove('shake'), 400); return; }
+  const chars = [...t.target];
+  const same = (a, b) => (db.settings.strictCase ? a === b : a.toLowerCase() === b.toLowerCase());
+  let allOk = true;
+  cells.forEach(c => {
+    const ok = same(c.value, chars[+c.dataset.k]);
+    if (!ok) allOk = false;
+    c.readOnly = true;
+    c.classList.add(ok ? 'right' : 'wrong');
+  });
+  const given = clozeValue(t);
+  const r = allOk ? { ok: true } : checkAnswer(given, t.target, db.settings.strictCase);
+  settle(allOk, { given, r: allOk ? null : { ...r, target: t.target } });
+}
+
+// Клетки: одна буква, после ввода — следующая клетка; Backspace в пустой — предыдущая.
+let lastCell = null;
+app.addEventListener('focusin', e => { if (e.target.matches?.('.cell')) lastCell = e.target; });
+app.addEventListener('input', e => {
+  const c = e.target;
+  if (!c.matches?.('.cell') || c.readOnly) return;
+  if (c.value.length > 1) c.value = c.value.slice(-1);
+  if (c.value) {
+    const cells = $$('.cell');
+    cells[cells.indexOf(c) + 1]?.focus();
+  }
+});
+app.addEventListener('keydown', e => {
+  const c = e.target;
+  if (!c.matches?.('.cell') || e.key !== 'Backspace' || c.value) return;
+  const cells = $$('.cell');
+  const prev = cells[cells.indexOf(c) - 1];
+  if (prev && !prev.readOnly) { e.preventDefault(); prev.value = ''; prev.focus(); }
+});
+
 app.addEventListener('pointerdown', e => {
   const k = e.target.closest('[data-ins]');
   if (!k) return;
   e.preventDefault();
+  if ($('#cloze')) { // задание с пропусками: вставляем в текущую клетку
+    const c = document.activeElement?.matches?.('.cell') ? document.activeElement : lastCell || $('.cell');
+    if (!c || c.readOnly) return;
+    c.value = k.dataset.ins;
+    c.dispatchEvent(new Event('input', { bubbles: true })); // перейдёт к следующей клетке
+    return;
+  }
   const inp = $('#ans');
   if (!inp || inp.readOnly) return;
   const focused = document.activeElement === inp;
@@ -613,7 +731,7 @@ document.addEventListener('keydown', e => {
   if (e.key === 'Enter') {
     e.preventDefault();
     if (session.fb) actions.next();
-    else if ($('#ans')) actions.check();
+    else if ($('#ans') || $('#cloze')) actions.check();
     return;
   }
   if (!session.fb && session.opts && /^[1-4]$/.test(e.key)) {

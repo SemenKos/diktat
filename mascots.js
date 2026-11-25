@@ -155,7 +155,37 @@ const SONG = [
   ['А ', 392], ['кро', 523], ['ко', 523], ['диль', 587], ['чик ', 659], ['прос', 659], ['то ', 587], ['класс,', 523, 2.2],
   ['на', 440], ['у', 440], ['чит ', 494], ['мно', 523], ['го', 587], ['му ', 659], ['он ', 587], ['вас!', 523, 2.6],
 ];
-const BEAT = 0.3;
+const BEAT = 0.34; // чуть медленнее, чтобы синтез речи успевал «петь» строку под свою музыкальную фразу
+const SONG_LINES = [[0, 'А крокодильчик просто класс,'], [8, 'научит многому он вас!']]; // [индекс первого слога, текст]
+
+/* ---------- Голоса ---------- */
+// Голосом говорит синтез речи телефона. Характер задаём высотой и скоростью:
+// Огарь — высокий быстрый голосок, Крокодильчик — низкий смешной бас.
+// Реплики встают в очередь после немецкого слова, которое произносится после ответа.
+
+const VOICE = {
+  ogar: { pitch: 1.9, rate: 1.12 },
+  croc: { pitch: 0.3, rate: 0.92 },
+  crocSing: { pitch: 0.55, rate: 0.82 },
+};
+let ruVoice = null;
+function pickRuVoice() {
+  const vs = speechSynthesis.getVoices();
+  ruVoice = vs.find(v => /^ru[-_]RU/i.test(v.lang)) || vs.find(v => /^ru/i.test(v.lang)) || null;
+}
+if ('speechSynthesis' in window) { pickRuVoice(); speechSynthesis.addEventListener?.('voiceschanged', pickRuVoice); }
+
+/** Реплика персонажа. who: 'ogar' | 'croc' | 'crocSing', lang: 'ru' | 'de'. Не перебивает уже звучащую речь. */
+function charSay(who, text, lang = 'ru') {
+  if (!db.settings.voices || !('speechSynthesis' in window)) return;
+  const u = new SpeechSynthesisUtterance(text);
+  u.lang = lang === 'de' ? 'de-DE' : 'ru-RU';
+  const v = lang === 'de' ? deVoice : ruVoice;
+  if (v) u.voice = v;
+  u.pitch = VOICE[who].pitch;
+  u.rate = VOICE[who].rate;
+  speechSynthesis.speak(u);
+}
 
 function songHtml() {
   return `<div class="song" id="song">🎵 ${SONG.map(([s], i) =>
@@ -163,24 +193,34 @@ function songHtml() {
 }
 
 function stopSong() {
+  if (songTimers.length && 'speechSynthesis' in window) speechSynthesis.cancel();
   songTimers.forEach(clearTimeout);
   songTimers = [];
 }
 
-/** Поёт песню: мелодия + подсветка слогов. Подсветка работает и без звука. */
+/** Поёт песню: мелодия + голос Крокодильчика по строкам + подсветка слогов (она работает и без звука). */
 function singSong() {
   stopSong();
+  if ('speechSynthesis' in window) speechSynthesis.cancel();
   const spans = [...document.querySelectorAll('#song span')];
   spans.forEach(s => s.classList.remove('on'));
+  document.querySelector('#song')?.classList.remove('done');
+  const starts = [];
   let t = 0;
   SONG.forEach(([, f, len = 1], i) => {
     const d = BEAT * len;
-    tone(f, t, d * 0.95, { type: 'triangle', vol: 0.13 });
-    if (i % 2 === 0) tone(f / 4, t, BEAT * 1.6, { type: 'sine', vol: 0.08 }); // бас
+    starts[i] = t;
+    tone(f, t, d * 0.95, { type: 'triangle', vol: 0.11 });
+    if (i % 2 === 0) tone(f / 4, t, BEAT * 1.6, { type: 'sine', vol: 0.07 }); // бас
     songTimers.push(setTimeout(() => spans[i]?.classList.add('on'), t * 1000));
     t += d;
   });
-  songTimers.push(setTimeout(() => document.querySelector('#song')?.classList.add('done'), t * 1000));
+  for (const [i, line] of SONG_LINES) songTimers.push(setTimeout(() => charSay('crocSing', line), starts[i] * 1000));
+  songTimers.push(setTimeout(() => {
+    document.querySelector('#song')?.classList.add('done');
+    charSay('croc', 'Ха-ха-ха!');
+    songTimers = [];
+  }, t * 1000 + 200));
 }
 
 /* ---------- Сцены итогов ---------- */
@@ -214,7 +254,7 @@ function sceneHtml(kind) {
     <h1>Крокодильчик доволен: ошибок много!</h1>
     <p class="muted">Поработай над ошибками — и Огарь полетит учиться в Германию.</p>`;
   }
-  const ph = ogarPhrase();
+  const ph = midPhrase = ogarPhrase();
   return `<div class="scene meadow">
       <div class="mid-ogar">${ogarSvg()}</div>
       <div class="mid-say">${ph.flag} ${esc(ph.text)}</div>
@@ -223,8 +263,25 @@ function sceneHtml(kind) {
     <p class="muted">Noch ein bisschen üben — ещё чуть-чуть, и Огарь полетит в Германию.</p>`;
 }
 
+let midPhrase = null;
+
 function startScene(kind) {
-  if (kind === 'fly') { sfx.fly(); setTimeout(() => sfx.quack(), 900); }
-  else if (kind === 'croc') singSong();
-  else sfx.quack();
+  if (kind === 'fly') {
+    sfx.fly();
+    setTimeout(() => sfx.quack(), 900);
+    charSay('ogar', 'Ура! Я лечу учиться в Германию!');
+    charSay('ogar', 'Tschüss! Bis bald!', 'de');
+  } else if (kind === 'croc') {
+    singSong();
+  } else {
+    sfx.quack();
+    charSay('ogar', 'Неплохо! Ещё чуть-чуть — и полетим в Германию!');
+    if (midPhrase) charSay('ogar', midPhrase.text, midPhrase.lang);
+  }
+}
+
+/** Реплика в плашке ответа: после немецкого слова. */
+function mascotSpeak(ok, phrase) {
+  if (ok) charSay('ogar', phrase.text, phrase.lang);
+  else charSay('croc', phrase);
 }
