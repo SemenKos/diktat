@@ -1,6 +1,6 @@
 // Офлайн-режим: сначала сеть (чтобы обновления приходили сразу), при отсутствии сети — кэш.
-const CACHE = 'diktat-v3';
-const ASSETS = ['./', './index.html', './style.css', './logic.js', './translate.js', './app.js', './manifest.json', './icon.svg', './icon-192.png', './icon-512.png'];
+const CACHE = 'diktat-v4';
+const ASSETS = ['./', './index.html', './style.css', './logic.js', './translate.js', './mascots.js', './app.js', './manifest.json', './icon.svg', './icon-192.png', './icon-512.png'];
 
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(ASSETS)).then(() => self.skipWaiting()));

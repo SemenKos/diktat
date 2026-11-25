@@ -1,5 +1,6 @@
 'use strict';
-/* global parseText, checkAnswer, lcsMarks, norm, splitRu, suggestArticle, translateWord, cleanOcrLine, ocrFlag, Tesseract */
+/* global parseText, checkAnswer, lcsMarks, norm, splitRu, suggestArticle, translateWord, cleanOcrLine, ocrFlag, Tesseract,
+   ogarSvg, mascotMini, ogarPhrase, crocPhrase, sfx, sceneFor, sceneHtml, startScene, stopSong, singSong */
 
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
@@ -20,7 +21,7 @@ const nWords = n => `${n} ${plural(n, 'слово', 'слова', 'слов')}`;
 
 /* ---------- Данные ---------- */
 
-const DEFAULT_SETTINGS = { strictCase: true, autoSpeak: true, rate: 0.9 };
+const DEFAULT_SETTINGS = { strictCase: true, autoSpeak: true, rate: 0.9, mascots: true, sounds: true };
 
 function newWord(de, ru) { return { id: uid(), de, ru, ok: 0, bad: 0, err: 0, last: 0 }; }
 
@@ -118,6 +119,7 @@ window.addEventListener('hashchange', render);
 function render() {
   const [r, id] = location.hash.replace(/^#\/?/, '').split('/');
   if (r !== 'session' && hasTTS) speechSynthesis.cancel();
+  stopSong();
   if (r !== 'edit') { closePhotos(); draft = null; }
   window.scrollTo(0, 0);
   switch (r) {
@@ -223,6 +225,10 @@ function viewSettings() {
         <input type="checkbox" class="switch" data-set="strictCase" ${st.strictCase ? 'checked' : ''}></label>
       <label class="row"><div class="grow"><b>Автоозвучка</b><small>Произносить немецкие слова автоматически</small></div>
         <input type="checkbox" class="switch" data-set="autoSpeak" ${st.autoSpeak ? 'checked' : ''}></label>
+      <label class="row"><div class="grow"><b>Огарь и Крокодильчик</b><small>Радуются ответам, песня и полёт в Германию в конце урока</small></div>
+        <input type="checkbox" class="switch" data-set="mascots" ${st.mascots ? 'checked' : ''}></label>
+      <label class="row"><div class="grow"><b>Звуки персонажей</b><small>Кряканье, смех Крокодильчика и его песня</small></div>
+        <input type="checkbox" class="switch" data-set="sounds" ${st.sounds ? 'checked' : ''}></label>
       <div class="row col">
         <div><b>Скорость речи:</b> <span id="rateV">${st.rate}</span></div>
         <input type="range" min="0.5" max="1.2" step="0.05" value="${st.rate}" data-set="rate">
@@ -407,9 +413,13 @@ function settle(ok, info) {
   if (t.type !== 'de2ru' || !ok) speak(w.de);
   if (!ok) navigator.vibrate?.(120);
 
+  const mascots = db.settings.mascots;
+  const ph = ok && mascots ? ogarPhrase() : null;
+  if (mascots) ok ? sfx.quack() : sfx.croc();
   let html;
   if (ok) {
-    html = `<div class="fb-title">${PRAISE[Math.floor(Math.random() * PRAISE.length)]}</div>
+    const title = ph ? `${esc(ph.text)} <span class="lang">${ph.flag}</span>` : PRAISE[Math.floor(Math.random() * PRAISE.length)];
+    html = `<div class="fb-title">${title}</div>
       ${info.r?.note ? `<div class="fb-note">${esc(info.r.note)}</div>` : ''}
       <div class="fb-pair"><b>${esc(w.de)}</b> — ${esc(w.ru)}</div>`;
   } else if (info.r) {
@@ -422,7 +432,7 @@ function settle(ok, info) {
   }
   const f = $('#footer');
   f.className = 'footer fb ' + (ok ? 'ok' : 'bad');
-  f.innerHTML = `<div class="fb-body">${html}</div>
+  f.innerHTML = `<div class="fb-row"><div class="fb-body">${html}</div>${mascots ? mascotMini(ok, ok ? '' : esc(crocPhrase())) : ''}</div>
     <button class="btn ${ok ? 'success' : 'danger'} big" data-act="next" id="nextBtn">Дальше</button>`;
   const inp = $('#ans');
   if (inp) inp.focus(); else $('#nextBtn').focus();
@@ -463,11 +473,12 @@ function viewResult() {
         <div class="grow"><b>${esc(w.de)}</b><small>${esc(w.ru)}</small></div></li>`).join('')}</ul>`;
   }
 
+  const scene = db.settings.mascots ? sceneFor(pct) : null;
   app.innerHTML = `
     <div class="result">
-      <div class="trophy">${pct >= 90 ? '🏆' : pct >= 70 ? '🎉' : '💪'}</div>
-      <h1>${r.exam ? 'Контрольная завершена' : 'Тренировка завершена!'}</h1>
-      <p class="muted">${esc(r.title)}</p>
+      ${scene ? sceneHtml(scene) : `<div class="trophy">${pct >= 90 ? '🏆' : pct >= 70 ? '🎉' : '💪'}</div>
+      <h1>${r.exam ? 'Контрольная завершена' : 'Тренировка завершена!'}</h1>`}
+      <p class="muted">${r.exam ? 'Контрольная · ' : ''}${esc(r.title)}</p>
       <div class="stats">
         ${r.exam ? `<div class="stat accent"><b>${grade}</b><small>оценка</small></div>` : ''}
         <div class="stat"><b>${pct}%</b><small>точность</small></div>
@@ -478,12 +489,14 @@ function viewResult() {
       ${mist.length ? `<button class="btn primary big" data-act="retryMistakes">🎯 Поработать над ошибками (${mist.length})</button>` : ''}
       <button class="btn ghost big" data-go="${r.lid ? 'lesson/' + r.lid : ''}">Готово</button>
     </div>`;
+  if (scene && !r.shown) { r.shown = true; startScene(scene); }
 }
 
 /* ---------- Действия ---------- */
 
 const actions = {
   back() { history.length > 1 ? history.back() : go(''); },
+  singAgain() { singSong(); },
   say(el) { speak(el.dataset.text); },
   saySlow(el) { speak(el.dataset.text, true); },
   start(el) {
